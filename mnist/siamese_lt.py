@@ -40,9 +40,9 @@ test_loader = torch.utils.data.DataLoader(
     )
 
 #Network
-class SaimeseNet(nn.Module):
+class SiameseNet(nn.Module):
     def __init__(self):
-        super(SaimeseNet, self).__init__()
+        super(SiameseNet, self).__init__()
         self.conv1 = nn.Conv2d(1, 20, kernel_size=5)
         self.conv2 = nn.Conv2d(20, 50, kernel_size=5)
         self.conv2_drop = nn.Dropout2d()
@@ -65,18 +65,18 @@ class SaimeseNet(nn.Module):
 
 class ContrastiveLoss(torch.nn.Module):
     def __init__(self, margin=2.0):
-        super(ConstrastiveLoss, self).__init__()
+        super(ContrastiveLoss, self).__init__()
         self.margin = margin
 
     def forward(self, out1, out2, label):
-        dist = F.pairwise_distance(out1, out2)
+        dist = F.pairwise_distance(out1, out2, p=1)
         loss = torch.mean((1 - label) * torch.pow(dist, 2) + (label) * torch.pow(torch.clamp(self.margin - dist, min=0.0), 2))
         return loss
         
-model = SaimeseNet()
+model = SiameseNet()
 model.cuda()
 
-crit = ConstrativeLoss()
+crit = ContrastiveLoss()
 optimizer = optim.SGD(model.parameters(), lr=LEARNING_RATE, momentum=SGD_MOMENTUM)
 
 
@@ -84,31 +84,39 @@ def train(epoch):
     model.train()
     for batch1, (data1, target1) in enumerate(train_loader):
         for batch2, (data2, target2) in enumerate(train_loader):
-            data1, target1 = data1.cuda(), target1.cuda()
-            data1, target1 = Variable(data1), Variable(target1)
-            data2, target2 = data2.cuda(), target2.cuda()
-            data2, target2 = Variable(data2), Variable(target2)
+            data1, data2, target1, target2 = data1.cuda(), data2.cuda(), target1.cuda(), target2.cuda()
+            target = torch.lt(target1, target2)
+            data1, data2, target = Variable(data1), Variable(data2), Variable(target)
             optimizer.zero_grad()
-            out1, out2 = model(data1, datlsa2)
+            out1, out2 = model(data1, data2)
             loss = crit(data1, data2, target)
             loss.backward()
             optimizer.step()
             if batch % LOG_INTERVAL == 0:
-                print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(epoch, batch * len(data), len(train_loader.dataset), 100. * batch / len(train_loader), loss.data[0]))
+                print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(epoch,
+                                                                               batch * len(data),
+                                                                               len(train_loader.dataset),
+                                                                               100. * batch / len(train_loader), loss.data[0]))
 
 def test(epoch):
     model.eval()
     test_loss = 0
     correct = 0
-    for data, target in test_loader:
-        data, target = data.cuda(), target.cuda()
-        data, target = Variable(data, volatile=True), Variable(target)
-        output = model(data)
-        test_loss += F.nll_loss(output, target).data[0]
-        pred = output.data.max(1)[1]
-        correct += pred.eq(target.data).cpu().sum()
+    for data1, target1 in test_loader:
+        for data2, target2 in test_loader:
+            data1, target1 = data1.cuda(), target1.cuda()
+            data2, target2 = data2.cuda(), target2.cuda()
+            target = torch.lt(target1, target2)
+            data1, data2, target = Variable(data1, volatile=True), Variable(data2, volatile=True), Variable(target)
+            out1, out2 = model(data1, data2)
+            test_loss += crit(out1, out2, target).data[0]
+            pred = out1.data.max(1)[1] < out2.data.max(1)[1]
+            correct += pred.eq(target.data).cpu().sum()
     test_loss /= len(test_loader)
-    print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(test_loss, correct, len(test_loader.dataset), 100. * correct / len(test_loader.dataset)))
+    print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(test_loss,
+                                                                                 correct,
+                                                                                 len(test_loader.dataset),
+                                                                                 100. * correct / len(test_loader.dataset)))
 
 def learn():
     for e in range(EPOCHS):

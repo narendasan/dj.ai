@@ -15,6 +15,7 @@ SGD_MOMENTUM = 0.5
 SEED = 1
 LOG_INTERVAL = 10
 NUM_CLASSES = 10
+EPOCH_SIZE = 1
 
 #Enable Cuda
 torch.cuda.manual_seed(SEED)
@@ -114,8 +115,12 @@ optimizer = optim.SGD(model.parameters(), lr=LEARNING_RATE, momentum=SGD_MOMENTU
 
 def train(epoch):
     model.train()
-    for batch1, (d1, t1) in enumerate(train_loader):
-        for batch2, (d2, t2) in enumerate(train_loader):
+    count = 0
+    for batch1, (d1, t1) in (enumerate(train_loader)):
+        count = count + 1
+        if(count > EPOCH_SIZE):
+            break
+        for batch2, (d2, t2) in (enumerate(train_loader)):
             d1, d2, t1, t2 = d1.cuda(), d2.cuda(), t1.cuda(), t2.cuda()
             t = torch.lt(t1, t2)
             #print(type(d1), type(d2), type(t))
@@ -141,11 +146,11 @@ def test(epoch):
             data1, target1 = data1.cuda(), target1.cuda()
             data2, target2 = data2.cuda(), target2.cuda()
             target = torch.lt(target1, target2)
-            data1, data2, target = Variable(data1, volatile=True), Variable(data2, volatile=True), Variable(target.torch.cuda.FloatTensor)
+            data1, data2, target = Variable(data1, volatile=True), Variable(data2, volatile=True), Variable(target.type(torch.cuda.FloatTensor))
             out1, out2 = model(data1, data2)
             test_loss += crit(out1, out2, target).data[0]
             pred = out1.data.max(1)[1] < out2.data.max(1)[1]
-            correct += pred.eq(target.data).cpu().sum()
+            correct += pred.eq(target.data).cpu().sum() # THERE'S A TYPE ERROR IN THIS LINE
     test_loss /= len(test_loader)
     print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(test_loss,
                                                                                  correct,

@@ -89,7 +89,7 @@ def train(epoch):
             data2, target2 = data2.cuda(), target2.cuda()
             data2, target2 = Variable(data2), Variable(target2)
             optimizer.zero_grad()
-            out1, out2 = model(data1, data2)
+            out1, out2 = model(data1, datlsa2)
             loss = crit(data1, data2, target)
             loss.backward()
             optimizer.step()

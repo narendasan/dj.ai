@@ -7,13 +7,14 @@ from torch.autograd import Variable
 import numpy as np
 import os
 
-BATCH_SIZE = 64
+BATCH_SIZE = 1
 TEST_BATCH_SIZE = 1000
 EPOCHS = 2
 LEARNING_RATE = 0.001
 SGD_MOMENTUM = 0.5  
 SEED = 1
 LOG_INTERVAL = 10
+NUM_CLASSES = 10
 
 #Enable Cuda
 torch.cuda.manual_seed(SEED)
@@ -38,6 +39,36 @@ test_loader = torch.utils.data.DataLoader(
     shuffle=True,
     **kwargs
     )
+
+# self.cnn1 = nn.Sequential(
+#             nn.ReflectionPad2d(1),
+#             nn.Conv2d(1, 4, kernel_size=3),
+#             nn.ReLU(inplace=True),
+#             nn.BatchNorm2d(4),
+#             nn.Dropout2d(p=.2),
+            
+#             nn.ReflectionPad2d(1),
+#             nn.Conv2d(4, 8, kernel_size=3),
+#             nn.ReLU(inplace=True),
+#             nn.BatchNorm2d(8),
+#             nn.Dropout2d(p=.2),
+
+#             nn.ReflectionPad2d(1),
+#             nn.Conv2d(8, 8, kernel_size=3),
+#             nn.ReLU(inplace=True),
+#             nn.BatchNorm2d(8),
+#             nn.Dropout2d(p=.2),
+#         )
+
+#         self.fc1 = nn.Sequential(
+#             nn.Linear(8*100*100, 500),
+#             nn.ReLU(inplace=True),
+
+#             nn.Linear(500, 500),
+#             nn.ReLU(inplace=True),
+
+#             nn.Linear(500, 5)
+# )
 
 #Network
 class SiameseNet(nn.Module):
@@ -69,29 +100,10 @@ class ContrastiveLoss(torch.nn.Module):
         self.margin = margin
 
     def forward(self, out1, out2, label):
-        # out1 and out2 are 64 x 1 x 28 x 28
-        out1 = out1.view(BATCH_SIZE, -1).type(torch.FloatTensor).cuda()
-        out2 = out2.view(BATCH_SIZE, -1).type(torch.FloatTensor).cuda()
-        dist = F.pairwise_distance(out1, out2, p=1)
-        # print(type(label))
-        # print(type(dist))
-        # dist = dist.view(BATCH_SIZE)
-        # var = Variable(torch.pow(torch.clamp(self.margin * torch.ones(BATCH_SIZE).type(torch.FloatTensor).cuda() - dist, min = 0.0), 2))
-        # loss = torch.mean( (1 + -1* label) * (torch.pow(dist, 2)) +
-        #                   (label) *var)
-        shift = torch.ones(BATCH_SIZE).type(torch.FloatTensor).cuda()
-        label_tensor = label.data.type(torch.cuda.FloatTensor)
-        dist_tensor = dist.data.type(torch.cuda.FloatTensor)
-        # print(label_tensor.size())
-        # print(dist_tensor.size())
-        # print(torch.pow(dist_tensor, 2).type())
-        loss = torch.add(-1*label_tensor, shift) * torch.pow(dist_tensor, 2).type(torch.cuda.FloatTensor) 
-        # print(loss.type())
-        # loss = torch.mean(torch.add(loss, torch.mm(label_tensor, torch.pow(torch.clamp(self.margin - dist_tensor, min = 0.0).type(torch.cuda.FloatTensor), 2).type(torch.cuda.FloatTensor)) )).type(torch.cuda.FloatTensor)
-        # print(torch.pow(dist_tensor -self.margin*shift, 2).type())
-        loss = torch.mean(torch.add(loss, label_tensor * torch.pow(dist_tensor - self.margin*shift, 2))) 
-        print(type(loss))
-        return Variable(loss, requires_grad = True) 
+        dist = F.pairwise_distance(out1, out2)
+        loss = torch.mean(((1-label) * torch.pow(dist,2)) + 
+                            ((label) * torch.pow(torch.clamp(self.margin-dist, min=0.0),2)))
+        return loss
         
 model = SiameseNet()
 model.cuda()
@@ -102,23 +114,23 @@ optimizer = optim.SGD(model.parameters(), lr=LEARNING_RATE, momentum=SGD_MOMENTU
 
 def train(epoch):
     model.train()
-    for batch1, (data1, target1) in enumerate(train_loader):
-        for batch2, (data2, target2) in enumerate(train_loader):
-            data1, data2, target1, target2 = data1.cuda(), data2.cuda(), target1.cuda(), target2.cuda()
-            target = torch.lt(target1, target2)
-            data1, data2, target = Variable(data1), Variable(data2), Variable(target)
+    for batch1, (d1, t1) in enumerate(train_loader):
+        for batch2, (d2, t2) in enumerate(train_loader):
+            d1, d2, t1, t2 = d1.cuda(), d2.cuda(), t1.cuda(), t2.cuda()
+            t = torch.lt(t1, t2)
+            #print(type(d1), type(d2), type(t))
+            data1, data2, target = Variable(d1), Variable(d2), Variable(t.type(torch.cuda.FloatTensor))
+            #print(type(data1), type(data2), type(target))
             optimizer.zero_grad()
             out1, out2 = model(data1, data2)
-            loss = crit(data1, data2, target)
-            print('got here')
+            loss = crit(out1, out2, target)
             loss.backward()
-            print('oh rip')
             optimizer.step()
-            if batch % LOG_INTERVAL == 0:
+            if (batch1 * len(train_loader.dataset) + batch2) % LOG_INTERVAL == 0:
                 print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(epoch,
-                                                                               batch * len(data),
-                                                                               len(train_loader.dataset),
-                                                                               100. * batch / len(train_loader), loss.data[0]))
+                                                                               (batch1 * len(train_loader.dataset) + batch2 ) * BATCH_SIZE,
+                                                                               len(train_loader.dataset) ** 2,
+                                                                               100. * (batch1 * len(train_loader.dataset) + batch2) / len(train_loader), loss.data[0]))
 
 def test(epoch):
     model.eval()
@@ -129,7 +141,7 @@ def test(epoch):
             data1, target1 = data1.cuda(), target1.cuda()
             data2, target2 = data2.cuda(), target2.cuda()
             target = torch.lt(target1, target2)
-            data1, data2, target = Variable(data1, volatile=True), Variable(data2, volatile=True), Variable(target)
+            data1, data2, target = Variable(data1, volatile=True), Variable(data2, volatile=True), Variable(target.torch.cuda.FloatTensor)
             out1, out2 = model(data1, data2)
             test_loss += crit(out1, out2, target).data[0]
             pred = out1.data.max(1)[1] < out2.data.max(1)[1]

@@ -69,9 +69,29 @@ class ContrastiveLoss(torch.nn.Module):
         self.margin = margin
 
     def forward(self, out1, out2, label):
+        # out1 and out2 are 64 x 1 x 28 x 28
+        out1 = out1.view(BATCH_SIZE, -1).type(torch.FloatTensor).cuda()
+        out2 = out2.view(BATCH_SIZE, -1).type(torch.FloatTensor).cuda()
         dist = F.pairwise_distance(out1, out2, p=1)
-        loss = torch.mean((1 - label) * torch.pow(dist, 2) + (label) * torch.pow(torch.clamp(self.margin - dist, min=0.0), 2))
-        return loss
+        # print(type(label))
+        # print(type(dist))
+        # dist = dist.view(BATCH_SIZE)
+        # var = Variable(torch.pow(torch.clamp(self.margin * torch.ones(BATCH_SIZE).type(torch.FloatTensor).cuda() - dist, min = 0.0), 2))
+        # loss = torch.mean( (1 + -1* label) * (torch.pow(dist, 2)) +
+        #                   (label) *var)
+        shift = torch.ones(BATCH_SIZE).type(torch.FloatTensor).cuda()
+        label_tensor = label.data.type(torch.cuda.FloatTensor)
+        dist_tensor = dist.data.type(torch.cuda.FloatTensor)
+        # print(label_tensor.size())
+        # print(dist_tensor.size())
+        # print(torch.pow(dist_tensor, 2).type())
+        loss = torch.add(-1*label_tensor, shift) * torch.pow(dist_tensor, 2).type(torch.cuda.FloatTensor) 
+        # print(loss.type())
+        # loss = torch.mean(torch.add(loss, torch.mm(label_tensor, torch.pow(torch.clamp(self.margin - dist_tensor, min = 0.0).type(torch.cuda.FloatTensor), 2).type(torch.cuda.FloatTensor)) )).type(torch.cuda.FloatTensor)
+        # print(torch.pow(dist_tensor -self.margin*shift, 2).type())
+        loss = torch.mean(torch.add(loss, label_tensor * torch.pow(dist_tensor - self.margin*shift, 2))) 
+        print(type(loss))
+        return Variable(loss, requires_grad = True) 
         
 model = SiameseNet()
 model.cuda()
@@ -90,7 +110,9 @@ def train(epoch):
             optimizer.zero_grad()
             out1, out2 = model(data1, data2)
             loss = crit(data1, data2, target)
+            print('got here')
             loss.backward()
+            print('oh rip')
             optimizer.step()
             if batch % LOG_INTERVAL == 0:
                 print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(epoch,

@@ -18,9 +18,11 @@ class sound_data(torch.utils.data.Dataset):
   def __len__(self):
     return len(self.data_files)
 
-  def get_data(self, name):
+  def get_data(self, name, norm = False):
     TIME = 30 * 1000
     sound = AudioSegment.from_mp3(name)
+    if(norm):
+      sound = AudioSegment.normalize(sound)
     start = sound[:TIME]
     end = sound[-TIME:]
     start_split = start.split_to_mono()
